@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn
+import torch.nn.functional as F
 from megatron.core import mpu
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.training import get_args, get_timers
@@ -57,24 +58,28 @@ class MegatronTrainer(BaseMegatronTrainer):
                   packed_seq_params=None):
         args = get_args()
 
-        losses = output_tensor.float()
-        loss_mask = labels != -100
-        if args.enable_dft_loss:
-            losses = losses * torch.exp(-losses.detach())
-        if loss_scale is not None:
-            losses = losses * loss_scale
-        if args.enable_channel_loss and channels is not None:
-            assert losses.shape[0] == 1, 'only support padding_free'
-            mode = 'train' if self.unwrapped_models[0].training else 'eval'
-            metrics = self.custom_metrics[mode]
-            num_samples = packed_seq_params.num_samples
-            cu_seqlens = packed_seq_params.cu_seqlens_q[:num_samples + 1] // args.context_parallel_size
-            for i in range(cu_seqlens.shape[0] - 1):
-                channel = channels[i]
-                slice_ = slice(cu_seqlens[i], cu_seqlens[i + 1])
-                metrics[f'loss_{channel}'].update(losses[0, slice_][loss_mask[0, slice_]])
+        patch_size = getattr(args, 'patch_size', 1)
+        if patch_size > 1:
+            loss = self._compute_patch_loss(output_tensor, labels, patch_size)
+        else:
+            losses = output_tensor.float()
+            loss_mask = labels != -100
+            if args.enable_dft_loss:
+                losses = losses * torch.exp(-losses.detach())
+            if loss_scale is not None:
+                losses = losses * loss_scale
+            if args.enable_channel_loss and channels is not None:
+                assert losses.shape[0] == 1, 'only support padding_free'
+                mode = 'train' if self.unwrapped_models[0].training else 'eval'
+                metrics = self.custom_metrics[mode]
+                num_samples = packed_seq_params.num_samples
+                cu_seqlens = packed_seq_params.cu_seqlens_q[:num_samples + 1] // args.context_parallel_size
+                for i in range(cu_seqlens.shape[0] - 1):
+                    channel = channels[i]
+                    slice_ = slice(cu_seqlens[i], cu_seqlens[i + 1])
+                    metrics[f'loss_{channel}'].update(losses[0, slice_][loss_mask[0, slice_]])
 
-        loss = torch.cat([torch.sum(losses * loss_mask).view(1), loss_mask.sum().view(1)])
+            loss = torch.cat([torch.sum(losses * loss_mask).view(1), loss_mask.sum().view(1)])
 
         if args.context_parallel_size > 1 and not self.mcore_013:
             loss = all_reduce(loss, group=mpu.get_context_parallel_group())
@@ -158,3 +163,34 @@ class MegatronTrainer(BaseMegatronTrainer):
                 channels=channels,
                 packed_seq_params=packed_seq_params)
         return output_tensor, loss_func
+
+    def _compute_patch_loss(self, logits: torch.Tensor, labels: torch.Tensor, patch_size: int):
+        logits = logits.float()
+        shift_logits = logits[:, :-1, :]
+        if shift_logits.numel() == 0:
+            zero = logits.new_zeros(1)
+            return torch.stack([zero, zero])
+        log_probs = F.log_softmax(shift_logits, dim=-1)
+        target_labels = labels[..., patch_size:]
+        if target_labels.shape[-1] % patch_size != 0:
+            raise ValueError('Label length must align with patch_size for PLT.')
+        log_probs = log_probs.reshape(-1, log_probs.shape[-1])
+        target_labels = target_labels.reshape(-1, patch_size)
+        ignore_index = -100
+        valid_mask = target_labels.ne(ignore_index)
+        total_valid = valid_mask.sum()
+        losses = []
+        for offset in range(patch_size):
+            if not valid_mask[:, offset].any():
+                continue
+            loss_offset = F.nll_loss(
+                log_probs,
+                target_labels[:, offset],
+                ignore_index=ignore_index,
+                reduction='sum',
+            )
+            denom = valid_mask[:, offset].sum()
+            losses.append(loss_offset / denom)
+        loss_val = torch.stack(losses).mean() if losses else log_probs.new_zeros(1)
+        total_valid = total_valid.to(dtype=loss_val.dtype)
+        return torch.stack([loss_val * total_valid, total_valid])

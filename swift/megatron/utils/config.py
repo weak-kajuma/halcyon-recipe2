@@ -54,6 +54,7 @@ config_mapping = {
     'window_size': ['sliding_window'],
     'layer_types': ['layer_types'],
     'interleave_moe_layer_step': ['interleave_moe_layer_step'],
+    'patch_size': ['patch_size'],
 }
 
 

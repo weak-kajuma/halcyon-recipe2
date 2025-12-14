@@ -149,3 +149,7 @@ megatron_output/
 
 # ast template
 ast_index_file.py
+
+# model
+llama_plt
+Llama-3.2-1B

@@ -101,6 +101,7 @@ def model_provider(pre_process=True,
         config = core_transformer_config_from_yaml(args, 'language_model')
     else:
         config = core_transformer_config_from_args(args)
+    config.patch_size = getattr(args, 'patch_size', 1)
     config.variable_seq_lengths = True
     if args.use_legacy_models:
         model = megatron.legacy.model.GPTModel(

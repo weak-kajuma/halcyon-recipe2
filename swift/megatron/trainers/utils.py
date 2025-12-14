@@ -25,6 +25,16 @@ from swift.utils.torch_utils import empty_cache, get_current_device
 mcore_013 = version.parse(megatron.core.__version__) >= version.parse('0.13.0rc0')
 
 
+def _truncate_position_ids(position_ids: torch.Tensor, patch_size: int) -> torch.Tensor:
+    seq_len = position_ids.shape[-1]
+    if seq_len % patch_size != 0:
+        raise ValueError(f'Sequence length ({seq_len}) must be divisible by patch_size {patch_size}.')
+    num_patches = seq_len // patch_size
+    if num_patches == seq_len:
+        return position_ids
+    return position_ids[..., :num_patches]
+
+
 def get_swift_datasets_provider(train_dataset, val_dataset):
 
     def swift_datasets_provider(train_val_test_num_samples):
@@ -46,11 +56,17 @@ def get_swift_datasets_provider(train_dataset, val_dataset):
 # Code borrowed from NVIDIA/Megatron-LM
 def get_batch_on_this_tp_rank(data, vp_stage=None):
     args = get_args()
+    patch_size = getattr(args, 'patch_size', 1)
 
-    if args.task_type == 'causal_lm':
+    if args.task_type == 'causal_lm' and patch_size == 1:
         data['labels'] = torch.roll(data['labels'], -1, dims=-1)
         if 'loss_scale' in data:
             data['loss_scale'] = torch.roll(data['loss_scale'], -1, dims=-1)
+    if patch_size > 1:
+        for key in ['position_ids', 'text_position_ids']:
+            position_ids = data.get(key)
+            if position_ids is not None:
+                data[key] = _truncate_position_ids(position_ids, patch_size)
     batch = to_device(data, 'cuda', non_blocking=True)
     if args.pipeline_model_parallel_size == 1:
         return batch

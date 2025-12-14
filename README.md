@@ -1,3 +1,4 @@
+This repo is customized version for [Patch-Level Training](https://arxiv.org/abs/2407.12665)
 # SWIFT (Scalable lightWeight Infrastructure for Fine-Tuning)
 
 <p align="center">

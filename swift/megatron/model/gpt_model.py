@@ -156,6 +156,7 @@ class GPTModel(McoreGPTModel):
                 attention = layer.transformer_layer.self_attention
                 attention.config = deepcopy(attention.config)
                 attention.config.apply_rope_fusion = False
+        self.patch_size = getattr(config, 'patch_size', 1) or 1
 
     def _patch_apply_rotary_pos_emb(self):
         from megatron.core.transformer import attention
@@ -173,6 +174,7 @@ class GPTModel(McoreGPTModel):
         input_ids: torch.Tensor,
         position_ids: torch.Tensor,
         decoder_input: torch.Tensor = None,
+        attention_mask: torch.Tensor = None,
         inference_context: BaseInferenceContext = None,
         packed_seq_params: PackedSeqParams = None,
     ):
@@ -255,7 +257,11 @@ class GPTModel(McoreGPTModel):
         if in_inference_mode and not has_config_logger_enabled(self.config):
             decoder_input = WrappedTensor(decoder_input)
 
-        return decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset
+        if self.patch_size > 1:
+            decoder_input, position_ids, attention_mask = self._apply_patch_preprocess(
+                decoder_input, position_ids, attention_mask)
+
+        return decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset, attention_mask
 
     # Code borrowed from NVIDIA/Megatron-LM
     def forward(
@@ -287,10 +293,11 @@ class GPTModel(McoreGPTModel):
 
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
-        decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset = (
+        decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset, attention_mask = (
             self._preprocess(
                 input_ids=input_ids,
                 position_ids=position_ids,
+                attention_mask=attention_mask,
                 decoder_input=decoder_input,
                 inference_context=inference_context,
                 packed_seq_params=packed_seq_params,
@@ -467,7 +474,7 @@ class GPTModel(McoreGPTModel):
             })
             log_config_to_disk(self.config, payload, prefix='input_and_logits')
 
-        if labels is None:
+        if labels is None or self.patch_size > 1:
             # [s b h] => [b s h]
             return logits.transpose(0, 1).contiguous()
 
@@ -477,3 +484,65 @@ class GPTModel(McoreGPTModel):
 
     def get_input_tensor(self):
         return self.decoder.input_tensor
+
+    def _apply_patch_preprocess(self, decoder_input, position_ids, attention_mask):
+        if decoder_input is None and attention_mask is None and position_ids is None:
+            return decoder_input, position_ids, attention_mask
+        seq_len_tokens = None
+        if decoder_input is not None:
+            seq_len_tokens = decoder_input.shape[0]
+        elif attention_mask is not None:
+            seq_len_tokens = attention_mask.shape[-1]
+        elif position_ids is not None:
+            seq_len_tokens = position_ids.shape[-1]
+        if seq_len_tokens is None:
+            return decoder_input, position_ids, attention_mask
+        if seq_len_tokens % self.patch_size != 0:
+            raise ValueError(f'Sequence length ({seq_len_tokens}) must be divisible by patch_size {self.patch_size}.')
+        num_patches = seq_len_tokens // self.patch_size
+        if decoder_input is not None:
+            decoder_input = self._merge_patch_embeddings(decoder_input, num_patches)
+        position_ids = self._truncate_position_ids(position_ids, num_patches)
+        attention_mask = self._build_patch_attention_mask(attention_mask, seq_len_tokens, num_patches)
+        return decoder_input, position_ids, attention_mask
+
+    def _merge_patch_embeddings(self, decoder_input, num_patches):
+        if decoder_input.shape[0] == num_patches:
+            return decoder_input
+        seq_len, batch, hidden = decoder_input.shape
+        if seq_len != num_patches * self.patch_size:
+            raise ValueError('Unexpected decoder_input shape for patching.')
+        decoder_input = decoder_input.transpose(0, 1).contiguous()
+        decoder_input = decoder_input.view(
+            batch, num_patches, self.patch_size, hidden).mean(dim=2)
+        return decoder_input.transpose(0, 1).contiguous()
+
+    def _truncate_position_ids(self, position_ids, num_patches):
+        if position_ids is None or position_ids.shape[-1] == num_patches:
+            return position_ids
+        return position_ids[..., :num_patches]
+
+    def _build_patch_attention_mask(self, attention_mask, seq_len_tokens, num_patches):
+        if attention_mask is None:
+            return None
+        seq_len_mask = attention_mask.shape[-1]
+        if seq_len_mask == num_patches:
+            return attention_mask
+        if seq_len_mask != seq_len_tokens:
+            # Already patchified or packed; best-effort return original.
+            return attention_mask
+        device = attention_mask.device
+        batch = attention_mask.shape[0]
+        causal = torch.tril(torch.ones(
+            (num_patches, num_patches), dtype=torch.bool, device=device))
+        patch_mask = (~causal).view(1, 1, num_patches, num_patches).repeat(batch, 1, 1, 1)
+        diag = attention_mask[:, 0, torch.arange(
+            seq_len_mask, device=device), torch.arange(seq_len_mask, device=device)]
+        valid_tokens = (~diag).sum(dim=-1)
+        if torch.any(valid_tokens % self.patch_size != 0):
+            raise ValueError('Valid token length must align with patch_size for PLT.')
+        valid_patches = (valid_tokens // self.patch_size).to(torch.int64)
+        for idx, valid in enumerate(valid_patches.tolist()):
+            if valid < num_patches:
+                patch_mask[idx, :, valid:] = True
+        return patch_mask

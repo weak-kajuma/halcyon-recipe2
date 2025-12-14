@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Optional, Tuple
+import math
 
 import megatron.core
 import torch
@@ -286,6 +287,14 @@ def forward_step_helper(model, inputs, dtype=None):
     if mpu.is_pipeline_first_stage():
         micro_batch_size = 1  # use qkv_format 'thd'
         seq_length = inputs['position_ids'].shape[-1]
+        patch_size = getattr(args, 'patch_size', 1)
+        if patch_size > 1:
+            attention_mask = inputs.get('attention_mask')
+            attn_len = attention_mask.shape[-1] if attention_mask is not None else None
+            if attn_len is None or attn_len == seq_length:
+                if seq_length % patch_size != 0:
+                    raise ValueError(f'Sequence length ({seq_length}) must be divisible by patch_size {patch_size}.')
+                seq_length = seq_length // patch_size
         if args.sequence_parallel:
             seq_length //= mpu.get_tensor_model_parallel_world_size()
         recv_shape_buffer = torch.tensor([seq_length, micro_batch_size, args.hidden_size],
@@ -317,6 +326,9 @@ def get_padding_to(args):
         padding_to = args.tensor_model_parallel_size
     if args.context_parallel_size > 1:
         padding_to = (padding_to or 1) * args.context_parallel_size
+    patch_size = getattr(args, 'patch_size', 1)
+    if patch_size > 1:
+        padding_to = math.lcm(padding_to or 1, patch_size)
     origin_padding_to = padding_to
     fp8_format = getattr(args, 'fp8_format', None) or getattr(args, 'fp8', None)
     if args.fp8_recipe == 'blockwise':
