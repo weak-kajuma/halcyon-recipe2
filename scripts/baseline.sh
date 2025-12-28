@@ -3,9 +3,9 @@ NPROC_PER_NODE=1 \
 CUDA_VISIBLE_DEVICES=0 \
 megatron pt \
     --load Qwen3-0.6B-Base-mcore \
-    --dataset 'kajuma/test_dataset'\
+    --cached_dataset ./full \
     --micro_batch_size 1 \
-    --global_batch_size 256 \
+    --global_batch_size 259 \
     --attention_backend flash \
     --use_precision_aware_optimizer true \
     --overlap_grad_reduce True \
@@ -13,16 +13,16 @@ megatron pt \
     --finetune true \
     --cross_entropy_loss_fusion true \
     --lr 1e-4 \
-    --lr_warmup_iters 10 \
+    --lr_warmup_fraction 0.05 \
     --min_lr 3e-6 \
-    --train_iters 500 \
+    --train_iters 38100 \
     --save megatron_output/qwen3-baseline \
-    --save_interval 200 \
+    --save_interval 100 \
     --max_length 4096 \
     --truncation_strategy right \
     --packing true \
-    --wandb_project qwen3 \
-    --wandb_exp_name baseline_test \
+    --wandb_project plt \
+    --wandb_exp_name baseline \
     --log_interval 1 \
     --logging_level 20 \
     --num_workers 12 \

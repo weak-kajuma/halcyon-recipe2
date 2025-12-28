@@ -5,7 +5,7 @@ import shutil
 from huggingface_hub import HfApi
 
 WATCH_DIR = "/home/kazuma/codes/halcyon-recipe2/megatron_output/qwen3-baseline/v1-20251218-031023"
-REPO_ID = "kajuma/baseline"
+REPO_ID = "kajuma/patch"
 REPO_TYPE = "model"      # "model" / "dataset" / "space"
 PREFIX = "iter_"
 KEEP_LATEST = 2

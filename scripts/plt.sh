@@ -6,25 +6,21 @@ megatron pt \
     --custom_register_path custom_model/custom_register.py \
     --model_type qwen3_plt \
     --patch_size 4 \
-    --cached_dataset /workspace/2of3 \
+    --cached_dataset ./2of3 \
     --micro_batch_size 1 \
     --global_batch_size 256 \
     --attention_backend flash \
-    --recompute_num_layers 1 \
-    --recompute_granularity full \
-    --recompute_method uniform \
     --use_precision_aware_optimizer true \
     --overlap_grad_reduce True \
     --overlap_param_gather True \
     --finetune true \
     --cross_entropy_loss_fusion true \
     --lr 1e-4 \
-    --lr_warmup_iters 1 \
+    --lr_warmup_fraction 0.05 \
     --min_lr 3e-6 \
-    --max_epochs 1 \
-    --train_iters 25400 \
+    --train_iters 6350 \
     --save megatron_output/patch\
-    --save_interval 100 \
+    --save_interval 2 \
     --max_length 16384 \
     --truncation_strategy right \
     --packing true \
