@@ -9,6 +9,7 @@ from swift.llm.model.model_arch import ModelArch
 from swift.llm.template.constant import TemplateType
 
 from modeling_llama import LlamaForCausalLM
+from modeling_qwen2 import Qwen2ForCausalLM
 from modeling_qwen3 import Qwen3ForCausalLM
 
 print("[custom_register_path] loaded:", __file__)
@@ -90,7 +91,52 @@ register_model(
         model_arch=ModelArch.llama,
     ))
 
-_register_megatron_gpt_models(['llama3_2_plt', 'qwen3_plt'])
+register_model(
+    ModelMeta(
+        "qwen2_5_plt",
+        [
+            ModelGroup([
+                # instruct
+                Model('Qwen/Qwen2.5-0.5B-Instruct', 'Qwen/Qwen2.5-0.5B-Instruct'),
+                Model('Qwen/Qwen2.5-1.5B-Instruct', 'Qwen/Qwen2.5-1.5B-Instruct'),
+                Model('Qwen/Qwen2.5-3B-Instruct', 'Qwen/Qwen2.5-3B-Instruct'),
+                Model('Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-7B-Instruct'),
+                Model('Qwen/Qwen2.5-14B-Instruct', 'Qwen/Qwen2.5-14B-Instruct'),
+                Model('Qwen/Qwen2.5-32B-Instruct', 'Qwen/Qwen2.5-32B-Instruct'),
+                Model('Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen2.5-72B-Instruct'),
+                # base
+                Model('Qwen/Qwen2.5-0.5B', 'Qwen/Qwen2.5-0.5B'),
+                Model('Qwen/Qwen2.5-1.5B', 'Qwen/Qwen2.5-1.5B'),
+                Model('Qwen/Qwen2.5-3B', 'Qwen/Qwen2.5-3B'),
+                Model('Qwen/Qwen2.5-7B', 'Qwen/Qwen2.5-7B'),
+                Model('Qwen/Qwen2.5-14B', 'Qwen/Qwen2.5-14B'),
+                Model('Qwen/Qwen2.5-32B', 'Qwen/Qwen2.5-32B'),
+                Model('Qwen/Qwen2.5-72B', 'Qwen/Qwen2.5-72B'),
+            ]),
+            ModelGroup([
+                # coder instruct/base
+                Model('Qwen/Qwen2.5-Coder-0.5B-Instruct', 'Qwen/Qwen2.5-Coder-0.5B-Instruct'),
+                Model('Qwen/Qwen2.5-Coder-1.5B-Instruct', 'Qwen/Qwen2.5-Coder-1.5B-Instruct'),
+                Model('Qwen/Qwen2.5-Coder-3B-Instruct', 'Qwen/Qwen2.5-Coder-3B-Instruct'),
+                Model('Qwen/Qwen2.5-Coder-7B-Instruct', 'Qwen/Qwen2.5-Coder-7B-Instruct'),
+                Model('Qwen/Qwen2.5-Coder-14B-Instruct', 'Qwen/Qwen2.5-Coder-14B-Instruct'),
+                Model('Qwen/Qwen2.5-Coder-32B-Instruct', 'Qwen/Qwen2.5-Coder-32B-Instruct'),
+                Model('Qwen/Qwen2.5-Coder-0.5B', 'Qwen/Qwen2.5-Coder-0.5B'),
+                Model('Qwen/Qwen2.5-Coder-1.5B', 'Qwen/Qwen2.5-Coder-1.5B'),
+                Model('Qwen/Qwen2.5-Coder-3B', 'Qwen/Qwen2.5-Coder-3B'),
+                Model('Qwen/Qwen2.5-Coder-7B', 'Qwen/Qwen2.5-Coder-7B'),
+                Model('Qwen/Qwen2.5-Coder-14B', 'Qwen/Qwen2.5-Coder-14B'),
+                Model('Qwen/Qwen2.5-Coder-32B', 'Qwen/Qwen2.5-Coder-32B'),
+            ]),
+        ],
+        TemplateType.qwen2_5,
+        partial(get_model_tokenizer_with_flash_attn, automodel_class=Qwen2ForCausalLM),
+        architectures=['Qwen2ForCausalLM'],
+        requires=['transformers>=4.37'],
+        model_arch=ModelArch.llama,
+    ))
+
+_register_megatron_gpt_models(['llama3_2_plt', 'qwen3_plt', 'qwen2_5_plt'])
 
 if __name__ == '__main__':
     # Test and debug

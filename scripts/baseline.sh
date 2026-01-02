@@ -5,7 +5,7 @@ megatron pt \
     --load Qwen3-0.6B-Base-mcore \
     --cached_dataset ./full \
     --micro_batch_size 1 \
-    --global_batch_size 259 \
+    --global_batch_size 252 \
     --attention_backend flash \
     --use_precision_aware_optimizer true \
     --overlap_grad_reduce True \
